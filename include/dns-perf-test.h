@@ -20,6 +20,9 @@
 #define FIRST_BIT_UINT16 0x8000
 #define FIRST_TWO_BITS_UINT8 0xC0
 
+#define DNS_TypeA 1
+#define DNS_TypeCNAME 5
+
 typedef struct dns_header {
     uint16_t id;
     uint16_t flags;
@@ -29,10 +32,18 @@ typedef struct dns_header {
     uint16_t add;
 } __attribute__((packed)) dns_header_t;
 
-typedef struct end_name {
+typedef struct dns_que {
     uint16_t type;
     uint16_t class;
-} __attribute__((packed)) end_name_t;
+} __attribute__((packed)) dns_que_t;
+
+typedef struct dns_ans {
+    uint16_t type;
+    uint16_t class;
+    uint32_t ttl;
+    uint16_t len;
+    uint32_t ip4;
+} __attribute__((packed)) dns_ans_t;
 
 typedef struct memory {
     char *data;
