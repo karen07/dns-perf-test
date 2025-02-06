@@ -14,7 +14,7 @@
 #include <stdbool.h>
 
 #define PACKET_MAX_SIZE 1600
-#define URL_MAX_SIZE 300
+#define DOMAIN_MAX_SIZE 300
 #define EXIT_WAIT_SEC 5
 
 #define FIRST_BIT_UINT16 0x8000

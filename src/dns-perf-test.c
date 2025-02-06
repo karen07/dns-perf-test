@@ -1,8 +1,8 @@
 #include "dns-perf-test.h"
 
-FILE *domains_fp;
+FILE *in_domains_fp;
 FILE *cache_fp;
-FILE *urls_fp;
+FILE *out_domains_fp;
 FILE *ips_fp;
 
 uint32_t dns_ip;
@@ -42,7 +42,7 @@ void *send_dns(__attribute__((unused)) void *arg)
     char packet[PACKET_MAX_SIZE], line_buf[PACKET_MAX_SIZE];
     int32_t line_count = 0;
 
-    while (fscanf(domains_fp, "%s", line_buf) != EOF) {
+    while (fscanf(in_domains_fp, "%s", line_buf) != EOF) {
         line_count++;
 
         dns_header_t *header = (dns_header_t *)packet;
@@ -87,12 +87,12 @@ void *send_dns(__attribute__((unused)) void *arg)
     return NULL;
 }
 
-int32_t get_url_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **new_cur_pos_ptr,
-                            memory_t *url)
+int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **new_cur_pos_ptr,
+                               memory_t *domain)
 {
     uint8_t two_bit_mark = FIRST_TWO_BITS_UINT8;
     int32_t part_len = 0;
-    int32_t url_len = 0;
+    int32_t domain_len = 0;
 
     int32_t jump_count = 0;
 
@@ -112,10 +112,10 @@ int32_t get_url_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **new
                 if (part_len == 0) {
                     break;
                 } else {
-                    if (url_len >= (int32_t)url->max_size) {
+                    if (domain_len >= (int32_t)domain->max_size) {
                         return 2;
                     }
-                    url->data[url_len++] = '.';
+                    domain->data[domain_len++] = '.';
                 }
             } else if ((*cur_pos_ptr & two_bit_mark) == two_bit_mark) {
                 if (cur_pos_ptr + sizeof(uint16_t) > receive_msg_end) {
@@ -137,10 +137,10 @@ int32_t get_url_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **new
             if (cur_pos_ptr + sizeof(uint8_t) > receive_msg_end) {
                 return 6;
             }
-            if (url_len >= (int32_t)url->max_size) {
+            if (domain_len >= (int32_t)domain->max_size) {
                 return 7;
             }
-            url->data[url_len++] = *cur_pos_ptr;
+            domain->data[domain_len++] = *cur_pos_ptr;
             cur_pos_ptr++;
             part_len--;
         }
@@ -150,16 +150,16 @@ int32_t get_url_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **new
         *new_cur_pos_ptr = cur_pos_ptr;
     }
 
-    if (url_len >= (int32_t)url->max_size) {
+    if (domain_len >= (int32_t)domain->max_size) {
         return 8;
     }
-    url->data[url_len] = 0;
-    url->size = url_len;
+    domain->data[domain_len] = 0;
+    domain->size = domain_len;
 
     return 0;
 }
 
-int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_url, memory_t *ans_url)
+int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans_domain)
 {
     char *cur_pos_ptr = receive_msg->data;
     char *receive_msg_end = receive_msg->data + receive_msg->size;
@@ -190,22 +190,22 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_url, memory_t *ans_ur
     cur_pos_ptr += sizeof(dns_header_t);
     // DNS HEADER
 
-    // QUE URL
-    char *que_url_start = cur_pos_ptr;
-    char *que_url_end = NULL;
-    if (get_url_from_packet(receive_msg, que_url_start, &que_url_end, que_url) != 0) {
+    // QUE DOMAIN
+    char *que_domain_start = cur_pos_ptr;
+    char *que_domain_end = NULL;
+    if (get_domain_from_packet(receive_msg, que_domain_start, &que_domain_end, que_domain) != 0) {
         return 5;
     }
-    cur_pos_ptr = que_url_end;
+    cur_pos_ptr = que_domain_end;
 
     if (is_save) {
-        fwrite(que_url->data + 1, sizeof(char), strlen(que_url->data), cache_fp);
+        fwrite(que_domain->data + 1, sizeof(char), strlen(que_domain->data), cache_fp);
         fwrite(&receive_msg->size, sizeof(int32_t), 1, cache_fp);
         fwrite(receive_msg->data, sizeof(char), receive_msg->size, cache_fp);
-        fprintf(urls_fp, "%s\n", que_url->data + 1);
+        fprintf(out_domains_fp, "%s\n", que_domain->data + 1);
     }
 
-    // QUE URL
+    // QUE DOMAIN
 
     // QUE DATA
     if (cur_pos_ptr + sizeof(dns_que_t) > receive_msg_end) {
@@ -216,14 +216,15 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_url, memory_t *ans_ur
     // QUE DATA
 
     for (int32_t i = 0; i < ans_count; i++) {
-        // ANS URL
-        char *ans_url_start = cur_pos_ptr;
-        char *ans_url_end = NULL;
-        if (get_url_from_packet(receive_msg, ans_url_start, &ans_url_end, ans_url) != 0) {
+        // ANS DOMAIN
+        char *ans_domain_start = cur_pos_ptr;
+        char *ans_domain_end = NULL;
+        if (get_domain_from_packet(receive_msg, ans_domain_start, &ans_domain_end, ans_domain) !=
+            0) {
             return 7;
         }
-        cur_pos_ptr = ans_url_end;
-        // ANS URL
+        cur_pos_ptr = ans_domain_end;
+        // ANS DOMAIN
 
         // ANS DATA
         if (cur_pos_ptr + sizeof(dns_ans_t) - sizeof(uint32_t) > receive_msg_end) {
@@ -270,21 +271,21 @@ void *read_dns(__attribute__((unused)) void *arg)
         exit(EXIT_FAILURE);
     }
 
-    memory_t que_url;
-    que_url.size = 0;
-    que_url.max_size = URL_MAX_SIZE;
-    que_url.data = (char *)malloc(que_url.max_size * sizeof(char));
-    if (que_url.data == 0) {
-        printf("No free memory for que_url\n");
+    memory_t que_domain;
+    que_domain.size = 0;
+    que_domain.max_size = DOMAIN_MAX_SIZE;
+    que_domain.data = (char *)malloc(que_domain.max_size * sizeof(char));
+    if (que_domain.data == 0) {
+        printf("No free memory for que_domain\n");
         exit(EXIT_FAILURE);
     }
 
-    memory_t ans_url;
-    ans_url.size = 0;
-    ans_url.max_size = URL_MAX_SIZE;
-    ans_url.data = (char *)malloc(ans_url.max_size * sizeof(char));
-    if (ans_url.data == 0) {
-        printf("No free memory for ans_url\n");
+    memory_t ans_domain;
+    ans_domain.size = 0;
+    ans_domain.max_size = DOMAIN_MAX_SIZE;
+    ans_domain.data = (char *)malloc(ans_domain.max_size * sizeof(char));
+    if (ans_domain.data == 0) {
+        printf("No free memory for ans_domain\n");
         exit(EXIT_FAILURE);
     }
 
@@ -294,7 +295,7 @@ void *read_dns(__attribute__((unused)) void *arg)
 
         readed++;
 
-        dns_ans_check(&receive_msg, &que_url, &ans_url);
+        dns_ans_check(&receive_msg, &que_domain, &ans_domain);
     }
 
     return NULL;
@@ -310,7 +311,7 @@ int32_t main(int32_t argc, char *argv[])
                 if (strlen(argv[i + 1]) < PATH_MAX - 100) {
                     is_domains_file_path = 1;
                     strcpy(domains_file_path, argv[i + 1]);
-                    printf("Get urls from file %s\n", domains_file_path);
+                    printf("Get domains from file %s\n", domains_file_path);
                 }
                 i++;
             }
@@ -400,8 +401,8 @@ int32_t main(int32_t argc, char *argv[])
 
     printf("\n");
 
-    domains_fp = fopen(domains_file_path, "r");
-    if (!domains_fp) {
+    in_domains_fp = fopen(domains_file_path, "r");
+    if (!in_domains_fp) {
         printf("Error opening file %s\n", domains_file_path);
         return 0;
     }
@@ -412,9 +413,9 @@ int32_t main(int32_t argc, char *argv[])
             printf("Error opening file cache.data\n");
             return 0;
         }
-        urls_fp = fopen("urls.txt", "w");
-        if (!urls_fp) {
-            printf("Error opening file urls.txt\n");
+        out_domains_fp = fopen("out_domains.txt", "w");
+        if (!out_domains_fp) {
+            printf("Error opening file out_domains.txt\n");
             return 0;
         }
         ips_fp = fopen("ips.txt", "w");
