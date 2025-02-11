@@ -26,17 +26,6 @@ double coeff = 1;
 struct sockaddr_in repeater_addr, dns_addr;
 int32_t repeater_socket;
 
-void print_help(void)
-{
-    printf("Commands:\n"
-           "-file /example.txt            Domains file path\n"
-           "-DNS 0.0.0.0:00               DNS address\n"
-           "-listen 0.0.0.0:00            Listen address\n"
-           "-RPS 00000                    Request per second\n"
-           "-save                         Save DNS ans to cache.data\n");
-    exit(EXIT_FAILURE);
-}
-
 void *send_dns(__attribute__((unused)) void *arg)
 {
     char packet[PACKET_MAX_SIZE], line_buf[PACKET_MAX_SIZE];
@@ -76,7 +65,7 @@ void *send_dns(__attribute__((unused)) void *arg)
 
         if (sendto(repeater_socket, packet, 12 + k + 5, 0, (struct sockaddr *)&dns_addr,
                    sizeof(dns_addr)) < 0) {
-            printf("Error:Can't send %s\n", strerror(errno));
+            printf("Can't send %s\n", strerror(errno));
         }
 
         sended = line_count;
@@ -301,9 +290,24 @@ void *read_dns(__attribute__((unused)) void *arg)
     return NULL;
 }
 
+void print_help(void)
+{
+    printf("\nCommands:\n"
+           "  Required parameters:\n"
+           "    -file /example.txt            Domains file path\n"
+           "    -DNS 0.0.0.0:00               DNS address\n"
+           "    -listen 0.0.0.0:00            Listen address\n"
+           "    -RPS 00000                    Request per second\n"
+           "  Optional parameters:\n"
+           "    -save                         Save DNS answer data to cache.data,\n"
+           "                                  DNS answer domains to out_domains.txt,\n"
+           "                                  DNS answer IPs to ips.txt\n");
+    exit(EXIT_FAILURE);
+}
+
 int32_t main(int32_t argc, char *argv[])
 {
-    printf("\nDNS perf test started\n");
+    printf("\nDNS perf test started\n\n");
 
     for (int32_t i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-file")) {
@@ -365,36 +369,43 @@ int32_t main(int32_t argc, char *argv[])
             is_save = 1;
             continue;
         }
+        printf("Error:\n");
         printf("Unknown command %s\n", argv[i]);
         print_help();
     }
 
     if (!is_domains_file_path) {
+        printf("Error:\n");
         printf("Programm need domains file path\n");
         print_help();
     }
 
     if (dns_ip == 0) {
+        printf("Error:\n");
         printf("Programm need DNS IP\n");
         print_help();
     }
 
     if (dns_port == 0) {
+        printf("Error:\n");
         printf("Programm need DNS port\n");
         print_help();
     }
 
     if (listen_ip == 0) {
+        printf("Error:\n");
         printf("Programm need listen IP\n");
         print_help();
     }
 
     if (listen_port == 0) {
+        printf("Error:\n");
         printf("Programm need listen port\n");
         print_help();
     }
 
     if (rps == 0) {
+        printf("Error:\n");
         printf("Programm need rps\n");
         print_help();
     }
@@ -435,12 +446,12 @@ int32_t main(int32_t argc, char *argv[])
 
     repeater_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (repeater_socket < 0) {
-        printf("Error:Error while creating socket %s\n", strerror(errno));
+        printf("Error while creating socket %s\n", strerror(errno));
         return 0;
     }
 
     if (bind(repeater_socket, (struct sockaddr *)&repeater_addr, sizeof(repeater_addr)) < 0) {
-        printf("Error:Couldn't bind to the port %s\n", strerror(errno));
+        printf("Couldn't bind to the port %s\n", strerror(errno));
         return 0;
     }
 
