@@ -5,17 +5,8 @@ FILE *cache_fp;
 FILE *out_domains_fp;
 FILE *ips_fp;
 
-uint32_t dns_ip;
-uint16_t dns_port;
-
-uint32_t listen_ip;
-uint16_t listen_port;
-
-uint32_t rps;
-
-int32_t is_domains_file_path;
 char domains_file_path[PATH_MAX];
-
+uint32_t rps;
 int32_t is_save;
 
 int32_t sended;
@@ -23,8 +14,21 @@ int32_t readed;
 
 double coeff = 1;
 
-struct sockaddr_in repeater_addr, dns_addr;
-int32_t repeater_socket;
+struct sockaddr_in listen_addr, dns_addr;
+int32_t listen_socket;
+
+void errmsg(const char *format, ...)
+{
+    va_list args;
+
+    printf("Error: ");
+
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+
+    exit(EXIT_FAILURE);
+}
 
 void *send_dns(__attribute__((unused)) void *arg)
 {
@@ -63,9 +67,9 @@ void *send_dns(__attribute__((unused)) void *arg)
         end_name->type = htons(1);
         end_name->class = htons(1);
 
-        if (sendto(repeater_socket, packet, 12 + k + 5, 0, (struct sockaddr *)&dns_addr,
+        if (sendto(listen_socket, packet, 12 + k + 5, 0, (struct sockaddr *)&dns_addr,
                    sizeof(dns_addr)) < 0) {
-            printf("Can't send %s\n", strerror(errno));
+            errmsg("Can't send %s\n", strerror(errno));
         }
 
         sended = line_count;
@@ -75,6 +79,32 @@ void *send_dns(__attribute__((unused)) void *arg)
 
     return NULL;
 }
+
+#define DNS_TypeA 1
+#define DNS_TypeCNAME 5
+
+#define GET_DOMAIN_OK 0
+#define GET_DOMAIN_FIRST_BYTE_ERROR 1
+#define GET_DOMAIN_SECOND_BYTE_ERROR 3
+#define GET_DOMAIN_LAST_CH_DOMAIN_ERROR 2
+#define GET_DOMAIN_MAX_JUMP_COUNT 100
+#define GET_DOMAIN_JUMP_COUNT_ERROR 4
+#define GET_DOMAIN_TWO_BITS_ERROR 5
+#define GET_DOMAIN_CH_BYTE_ERROR 6
+#define GET_DOMAIN_ADD_CH_DOMAIN_ERROR 7
+#define GET_DOMAIN_NULL_CH_DOMAIN_ERROR 8
+
+#define DNS_ANS_CHECK_HEADER_SIZE_ERROR -2
+#define DNS_ANS_CHECK_RES_TYPE_ERROR -3
+#define DNS_ANS_CHECK_QUE_COUNT_ERROR -4
+#define DNS_ANS_CHECK_ANS_COUNT_ERROR -5
+#define DNS_ANS_CHECK_QUE_URL_GET_ERROR -6
+#define DNS_ANS_CHECK_QUE_DATA_GET_ERROR -7
+#define DNS_ANS_CHECK_ANS_URL_GET_ERROR -8
+#define DNS_ANS_CHECK_ANS_DATA_GET_ERROR -9
+#define DNS_ANS_CHECK_ANS_LEN_ERROR -10
+#define DNS_ANS_CHECK_CNAME_URL_GET_ERROR -11
+#define DNS_ANS_CHECK_NOT_END_ERROR -12
 
 int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **new_cur_pos_ptr,
                                memory_t *domain)
@@ -91,7 +121,7 @@ int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **
     while (true) {
         if (part_len == 0) {
             if (cur_pos_ptr + sizeof(uint8_t) > receive_msg_end) {
-                return 1;
+                return GET_DOMAIN_FIRST_BYTE_ERROR;
             }
             uint8_t first_byte_data = (*cur_pos_ptr) & (~two_bit_mark);
 
@@ -102,13 +132,13 @@ int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **
                     break;
                 } else {
                     if (domain_len >= (int32_t)domain->max_size) {
-                        return 2;
+                        return GET_DOMAIN_LAST_CH_DOMAIN_ERROR;
                     }
                     domain->data[domain_len++] = '.';
                 }
             } else if ((*cur_pos_ptr & two_bit_mark) == two_bit_mark) {
                 if (cur_pos_ptr + sizeof(uint16_t) > receive_msg_end) {
-                    return 3;
+                    return GET_DOMAIN_SECOND_BYTE_ERROR;
                 }
                 if (*new_cur_pos_ptr == NULL) {
                     *new_cur_pos_ptr = cur_pos_ptr + 2;
@@ -116,18 +146,18 @@ int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **
                 uint8_t second_byte_data = *(cur_pos_ptr + 1);
                 int32_t padding = 256 * first_byte_data + second_byte_data;
                 cur_pos_ptr = receive_msg->data + padding;
-                if (jump_count++ > 100) {
-                    return 4;
+                if (jump_count++ > GET_DOMAIN_MAX_JUMP_COUNT) {
+                    return GET_DOMAIN_JUMP_COUNT_ERROR;
                 }
             } else {
-                return 5;
+                return GET_DOMAIN_TWO_BITS_ERROR;
             }
         } else {
             if (cur_pos_ptr + sizeof(uint8_t) > receive_msg_end) {
-                return 6;
+                return GET_DOMAIN_CH_BYTE_ERROR;
             }
             if (domain_len >= (int32_t)domain->max_size) {
-                return 7;
+                return GET_DOMAIN_ADD_CH_DOMAIN_ERROR;
             }
             domain->data[domain_len++] = *cur_pos_ptr;
             cur_pos_ptr++;
@@ -140,12 +170,12 @@ int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **
     }
 
     if (domain_len >= (int32_t)domain->max_size) {
-        return 8;
+        return GET_DOMAIN_NULL_CH_DOMAIN_ERROR;
     }
     domain->data[domain_len] = 0;
     domain->size = domain_len;
 
-    return 0;
+    return GET_DOMAIN_OK;
 }
 
 int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans_domain)
@@ -155,7 +185,7 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
 
     // DNS HEADER
     if (cur_pos_ptr + sizeof(dns_header_t) > receive_msg_end) {
-        return 1;
+        return DNS_ANS_CHECK_HEADER_SIZE_ERROR;
     }
 
     dns_header_t *header = (dns_header_t *)cur_pos_ptr;
@@ -163,17 +193,17 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
     uint16_t first_bit_mark = FIRST_BIT_UINT16;
     uint16_t flags = ntohs(header->flags);
     if ((flags & first_bit_mark) == 0) {
-        return 2;
+        return DNS_ANS_CHECK_RES_TYPE_ERROR;
     }
 
     uint16_t quest_count = ntohs(header->quest);
     if (quest_count != 1) {
-        return 3;
+        return DNS_ANS_CHECK_QUE_COUNT_ERROR;
     }
 
     uint16_t ans_count = ntohs(header->ans);
     if (ans_count == 0) {
-        return 4;
+        return DNS_ANS_CHECK_ANS_COUNT_ERROR;
     }
 
     cur_pos_ptr += sizeof(dns_header_t);
@@ -183,7 +213,7 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
     char *que_domain_start = cur_pos_ptr;
     char *que_domain_end = NULL;
     if (get_domain_from_packet(receive_msg, que_domain_start, &que_domain_end, que_domain) != 0) {
-        return 5;
+        return DNS_ANS_CHECK_QUE_URL_GET_ERROR;
     }
     cur_pos_ptr = que_domain_end;
 
@@ -198,7 +228,7 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
 
     // QUE DATA
     if (cur_pos_ptr + sizeof(dns_que_t) > receive_msg_end) {
-        return 6;
+        return DNS_ANS_CHECK_QUE_DATA_GET_ERROR;
     }
 
     cur_pos_ptr += sizeof(dns_que_t);
@@ -210,14 +240,14 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
         char *ans_domain_end = NULL;
         if (get_domain_from_packet(receive_msg, ans_domain_start, &ans_domain_end, ans_domain) !=
             0) {
-            return 7;
+            return DNS_ANS_CHECK_ANS_URL_GET_ERROR;
         }
         cur_pos_ptr = ans_domain_end;
         // ANS DOMAIN
 
         // ANS DATA
         if (cur_pos_ptr + sizeof(dns_ans_t) - sizeof(uint32_t) > receive_msg_end) {
-            return 8;
+            return DNS_ANS_CHECK_ANS_DATA_GET_ERROR;
         }
 
         dns_ans_t *ans = (dns_ans_t *)cur_pos_ptr;
@@ -227,7 +257,7 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
         uint16_t ans_len = ntohs(ans->len);
 
         if (cur_pos_ptr + sizeof(dns_ans_t) - sizeof(uint32_t) + ans_len > receive_msg_end) {
-            return 9;
+            return DNS_ANS_CHECK_ANS_LEN_ERROR;
         }
 
         if (ans_type == DNS_TypeA) {
@@ -243,21 +273,23 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
         // ANS DATA
     }
 
+    if ((header->auth == 0) && (header->add == 0)) {
+        if (cur_pos_ptr != receive_msg_end) {
+            return DNS_ANS_CHECK_NOT_END_ERROR;
+        }
+    }
+
     return 0;
 }
 
 void *read_dns(__attribute__((unused)) void *arg)
 {
-    struct sockaddr_in receive_DNS_addr;
-    uint32_t receive_DNS_addr_length = sizeof(receive_DNS_addr);
-
     memory_t receive_msg;
     receive_msg.size = 0;
     receive_msg.max_size = PACKET_MAX_SIZE;
     receive_msg.data = (char *)malloc(receive_msg.max_size * sizeof(char));
     if (receive_msg.data == 0) {
-        printf("No free memory for receive_msg from DNS\n");
-        exit(EXIT_FAILURE);
+        errmsg("No free memory for receive_msg from DNS\n");
     }
 
     memory_t que_domain;
@@ -265,8 +297,7 @@ void *read_dns(__attribute__((unused)) void *arg)
     que_domain.max_size = DOMAIN_MAX_SIZE;
     que_domain.data = (char *)malloc(que_domain.max_size * sizeof(char));
     if (que_domain.data == 0) {
-        printf("No free memory for que_domain\n");
-        exit(EXIT_FAILURE);
+        errmsg("No free memory for que_domain\n");
     }
 
     memory_t ans_domain;
@@ -274,13 +305,11 @@ void *read_dns(__attribute__((unused)) void *arg)
     ans_domain.max_size = DOMAIN_MAX_SIZE;
     ans_domain.data = (char *)malloc(ans_domain.max_size * sizeof(char));
     if (ans_domain.data == 0) {
-        printf("No free memory for ans_domain\n");
-        exit(EXIT_FAILURE);
+        errmsg("No free memory for ans_domain\n");
     }
 
     while (true) {
-        receive_msg.size = recvfrom(repeater_socket, receive_msg.data, receive_msg.max_size, 0,
-                                    (struct sockaddr *)&receive_DNS_addr, &receive_DNS_addr_length);
+        receive_msg.size = recv(listen_socket, receive_msg.data, receive_msg.max_size, 0);
 
         readed++;
 
@@ -292,46 +321,49 @@ void *read_dns(__attribute__((unused)) void *arg)
 
 void print_help(void)
 {
-    printf("\nCommands:\n"
+    printf("Commands:\n"
            "  Required parameters:\n"
-           "    -file /example.txt            Domains file path\n"
-           "    -DNS 0.0.0.0:00               DNS address\n"
-           "    -listen 0.0.0.0:00            Listen address\n"
-           "    -RPS 00000                    Request per second\n"
+           "    -f  \"/example.txt\"  Domains file path\n"
+           "    -d  \"x.x.x.x:xx\"    DNS address\n"
+           "    -r  \"xxx\"           Request per second\n"
            "  Optional parameters:\n"
-           "    -save                         Save DNS answer data to cache.data,\n"
-           "                                  DNS answer domains to out_domains.txt,\n"
-           "                                  DNS answer IPs to ips.txt\n");
-    exit(EXIT_FAILURE);
+           "    --save              Save DNS answer data to cache.data,\n"
+           "                        DNS answer domains to out_domains.txt,\n"
+           "                        DNS answer IPs to ips.txt\n");
 }
+
+#define LISTEN_PORT_START 2000
 
 int32_t main(int32_t argc, char *argv[])
 {
-    printf("\nDNS perf test started\n\n");
+    printf("DNS perf test started\n");
+    printf("Launch parameters:\n");
+
+    dns_addr.sin_addr.s_addr = INADDR_NONE;
 
     for (int32_t i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-file")) {
+        if (!strcmp(argv[i], "-f")) {
             if (i != argc - 1) {
+                printf("  File  \"%s\"\n", argv[i + 1]);
                 if (strlen(argv[i + 1]) < PATH_MAX - 100) {
-                    is_domains_file_path = 1;
                     strcpy(domains_file_path, argv[i + 1]);
-                    printf("Get domains from file %s\n", domains_file_path);
                 }
                 i++;
             }
             continue;
         }
-        if (!strcmp(argv[i], "-DNS")) {
+        if (!strcmp(argv[i], "-d")) {
             if (i != argc - 1) {
+                printf("  DNS   \"%s\"\n", argv[i + 1]);
                 char *colon_ptr = strchr(argv[i + 1], ':');
                 if (colon_ptr) {
-                    sscanf(colon_ptr + 1, "%hu", &dns_port);
+                    uint16_t tmp_port = 0;
+                    sscanf(colon_ptr + 1, "%hu", &tmp_port);
                     *colon_ptr = 0;
                     if (strlen(argv[i + 1]) < INET_ADDRSTRLEN) {
-                        dns_ip = inet_addr(argv[i + 1]);
-                        struct in_addr dns_ip_in_addr;
-                        dns_ip_in_addr.s_addr = dns_ip;
-                        printf("DNS %s:%hu\n", inet_ntoa(dns_ip_in_addr), dns_port);
+                        dns_addr.sin_family = AF_INET;
+                        dns_addr.sin_port = htons(tmp_port);
+                        dns_addr.sin_addr.s_addr = inet_addr(argv[i + 1]);
                     }
                     *colon_ptr = ':';
                 }
@@ -339,142 +371,92 @@ int32_t main(int32_t argc, char *argv[])
             }
             continue;
         }
-        if (!strcmp(argv[i], "-listen")) {
+        if (!strcmp(argv[i], "-r")) {
             if (i != argc - 1) {
-                char *colon_ptr = strchr(argv[i + 1], ':');
-                if (colon_ptr) {
-                    sscanf(colon_ptr + 1, "%hu", &listen_port);
-                    *colon_ptr = 0;
-                    if (strlen(argv[i + 1]) < INET_ADDRSTRLEN) {
-                        listen_ip = inet_addr(argv[i + 1]);
-                        struct in_addr listen_ip_in_addr;
-                        listen_ip_in_addr.s_addr = listen_ip;
-                        printf("Listen %s:%hu\n", inet_ntoa(listen_ip_in_addr), listen_port);
-                    }
-                    *colon_ptr = ':';
-                }
-                i++;
-            }
-            continue;
-        }
-        if (!strcmp(argv[i], "-RPS")) {
-            if (i != argc - 1) {
+                printf("  RPS   \"%s\"\n", argv[i + 1]);
                 sscanf(argv[i + 1], "%u", &rps);
-                printf("RPS %d\n", rps);
                 i++;
             }
             continue;
         }
-        if (!strcmp(argv[i], "-save")) {
+        if (!strcmp(argv[i], "--save")) {
+            printf("  Save  enabled\n");
             is_save = 1;
             continue;
         }
-        printf("Error:\n");
-        printf("Unknown command %s\n", argv[i]);
         print_help();
+        errmsg("Unknown command %s\n", argv[i]);
     }
 
-    if (!is_domains_file_path) {
-        printf("Error:\n");
-        printf("Programm need domains file path\n");
+    if (domains_file_path[0] == 0) {
         print_help();
+        errmsg("Programm need domains file path\n");
     }
 
-    if (dns_ip == 0) {
-        printf("Error:\n");
-        printf("Programm need DNS IP\n");
+    if (dns_addr.sin_addr.s_addr == INADDR_NONE) {
         print_help();
+        errmsg("Programm need DNS IP\n");
     }
 
-    if (dns_port == 0) {
-        printf("Error:\n");
-        printf("Programm need DNS port\n");
+    if (dns_addr.sin_port == 0) {
         print_help();
-    }
-
-    if (listen_ip == 0) {
-        printf("Error:\n");
-        printf("Programm need listen IP\n");
-        print_help();
-    }
-
-    if (listen_port == 0) {
-        printf("Error:\n");
-        printf("Programm need listen port\n");
-        print_help();
+        errmsg("Programm need DNS port\n");
     }
 
     if (rps == 0) {
-        printf("Error:\n");
-        printf("Programm need rps\n");
         print_help();
+        errmsg("Programm need rps\n");
     }
-
-    printf("\n");
 
     in_domains_fp = fopen(domains_file_path, "r");
     if (!in_domains_fp) {
-        printf("Error opening file %s\n", domains_file_path);
-        return 0;
+        errmsg("Error opening file %s\n", domains_file_path);
     }
 
     if (is_save) {
         cache_fp = fopen("cache.data", "w");
         if (!cache_fp) {
-            printf("Error opening file cache.data\n");
-            return 0;
+            errmsg("Error opening file cache.data\n");
         }
         out_domains_fp = fopen("out_domains.txt", "w");
         if (!out_domains_fp) {
-            printf("Error opening file out_domains.txt\n");
-            return 0;
+            errmsg("Error opening file out_domains.txt\n");
         }
         ips_fp = fopen("ips.txt", "w");
         if (!ips_fp) {
-            printf("Error opening file ips.txt\n");
-            return 0;
+            errmsg("Error opening file ips.txt\n");
         }
     }
 
-    repeater_addr.sin_family = AF_INET;
-    repeater_addr.sin_port = htons(listen_port);
-    repeater_addr.sin_addr.s_addr = listen_ip;
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_port = htons(LISTEN_PORT_START);
+    listen_addr.sin_addr.s_addr = 0;
 
-    dns_addr.sin_family = AF_INET;
-    dns_addr.sin_port = htons(dns_port);
-    dns_addr.sin_addr.s_addr = dns_ip;
-
-    repeater_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (repeater_socket < 0) {
-        printf("Error while creating socket %s\n", strerror(errno));
-        return 0;
+    listen_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (listen_socket < 0) {
+        errmsg("Error while creating socket %s\n", strerror(errno));
     }
 
-    if (bind(repeater_socket, (struct sockaddr *)&repeater_addr, sizeof(repeater_addr)) < 0) {
-        printf("Couldn't bind to the port %s\n", strerror(errno));
-        return 0;
+    while (bind(listen_socket, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0) {
+        listen_addr.sin_port = htons(ntohs(listen_addr.sin_port) + 1);
     }
 
     pthread_t send_thread;
     if (pthread_create(&send_thread, NULL, send_dns, NULL)) {
-        printf("Can't create send_thread\n");
-        exit(EXIT_FAILURE);
+        errmsg("Can't create send_thread\n");
     }
 
     if (pthread_detach(send_thread)) {
-        printf("Can't detach send_thread\n");
-        exit(EXIT_FAILURE);
+        errmsg("Can't detach send_thread\n");
     }
 
     pthread_t read_thread;
     if (pthread_create(&read_thread, NULL, read_dns, NULL)) {
-        printf("Can't create read_thread\n");
-        exit(EXIT_FAILURE);
+        errmsg("Can't create read_thread\n");
     }
 
     if (pthread_detach(read_thread)) {
-        printf("Can't detach read_thread\n");
-        exit(EXIT_FAILURE);
+        errmsg("Can't detach read_thread\n");
     }
 
     int32_t sended_old = 0;

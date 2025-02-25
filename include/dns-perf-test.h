@@ -1,17 +1,18 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
-#include <poll.h>
+#include <net/if.h>
+#include <net/route.h>
 #include <pthread.h>
-#include <search.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/time.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
-#include <linux/limits.h>
-#include <stdbool.h>
 
 #define PACKET_MAX_SIZE 1600
 #define DOMAIN_MAX_SIZE 300
