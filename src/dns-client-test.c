@@ -410,21 +410,21 @@ int32_t main(int32_t argc, char *argv[])
 
     in_domains_fp = fopen(domains_file_path, "r");
     if (!in_domains_fp) {
-        errmsg("Can't opening file %s\n", domains_file_path);
+        errmsg("Can't open file %s\n", domains_file_path);
     }
 
     if (is_save) {
         cache_fp = fopen("cache.data", "w");
         if (!cache_fp) {
-            errmsg("Can't opening file cache.data\n");
+            errmsg("Can't open file cache.data\n");
         }
         out_domains_fp = fopen("out_domains.txt", "w");
         if (!out_domains_fp) {
-            errmsg("Can't opening file out_domains.txt\n");
+            errmsg("Can't open file out_domains.txt\n");
         }
         ips_fp = fopen("ips.txt", "w");
         if (!ips_fp) {
-            errmsg("Can't opening file ips.txt\n");
+            errmsg("Can't open file ips.txt\n");
         }
     }
 
@@ -434,7 +434,7 @@ int32_t main(int32_t argc, char *argv[])
 
     listen_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (listen_socket < 0) {
-        errmsg("Can't while creating socket %s\n", strerror(errno));
+        errmsg("Can't create socket %s\n", strerror(errno));
     }
 
     while (bind(listen_socket, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) < 0) {
