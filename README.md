@@ -4,12 +4,11 @@ DNS-client-test program resolves domains from a file with a set number of reques
 ```sh
 Commands:
   Required parameters:
-    -file /example.txt            Domains file path
-    -DNS 0.0.0.0:00               DNS address
-    -listen 0.0.0.0:00            Listen address
-    -RPS 00000                    Request per second
+    -f  "/example.txt"  Domains file path
+    -d  "x.x.x.x:xx"    DNS address
+    -r  "xxx"           Request per second
   Optional parameters:
-    -save                         Save DNS answer data to cache.data,
-                                  DNS answer domains to out_domains.txt,
-                                  DNS answer IPs to ips.txt
+    --save              Save DNS answer data to cache.data,
+                        DNS answer domains to out_domains.txt,
+                        DNS answer IPs to ips.txt
 ```
