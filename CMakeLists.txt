@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 
-project(dns-perf-test)
+project(dns-client-test)
 
 add_compile_options(-Wall -Wextra -Werror -Wpedantic)
 add_link_options()
