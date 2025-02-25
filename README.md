@@ -1,4 +1,4 @@
-# DNS perf test
+# DNS client test
 DNS-client-test program resolves domains from a file with a set number of requests per second. And it can save the results to files. The cache.data can be used in the dns-server-test program.
 ## Usage
 ```sh

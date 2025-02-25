@@ -336,7 +336,7 @@ void print_help(void)
 
 int32_t main(int32_t argc, char *argv[])
 {
-    printf("DNS perf test started\n");
+    printf("DNS client test started\n");
     printf("Launch parameters:\n");
 
     dns_addr.sin_addr.s_addr = INADDR_NONE;
