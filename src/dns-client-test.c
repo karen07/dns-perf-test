@@ -279,7 +279,7 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
         }
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 void *read_dns(__attribute__((unused)) void *arg)
@@ -482,7 +482,7 @@ int32_t main(int32_t argc, char *argv[])
         }
 
         if (exit_wait >= EXIT_WAIT_SEC) {
-            return 0;
+            return EXIT_SUCCESS;
         }
 
         coeff *= (1.0 * rps) / (sended - sended_old);
@@ -491,5 +491,5 @@ int32_t main(int32_t argc, char *argv[])
         readed_old = readed;
     }
 
-    return 0;
+    return EXIT_SUCCESS;
 }
