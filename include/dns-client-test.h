@@ -25,6 +25,8 @@
 #define DNS_TypeA 1
 #define DNS_TypeCNAME 5
 
+#define BLACKLIST_MAX_COUNT 128
+
 typedef struct dns_header {
     uint16_t id;
     uint16_t flags;
@@ -52,3 +54,11 @@ typedef struct memory {
     size_t size;
     size_t max_size;
 } memory_t;
+
+#ifndef _SUBNET_TYPE
+#define _SUBNET_TYPE
+typedef struct subnet {
+    uint32_t ip;
+    uint32_t mask;
+} subnet_t;
+#endif

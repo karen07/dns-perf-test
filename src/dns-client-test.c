@@ -17,6 +17,9 @@ double coeff = 1;
 struct sockaddr_in listen_addr, dns_addr;
 int32_t listen_socket;
 
+int32_t blacklist_count;
+subnet_t blacklist[BLACKLIST_MAX_COUNT];
+
 void errmsg(const char *format, ...)
 {
     va_list args;
@@ -178,6 +181,14 @@ int32_t get_domain_from_packet(memory_t *receive_msg, char *cur_pos_ptr, char **
     return GET_DOMAIN_OK;
 }
 
+int32_t in_subnet(uint32_t ip, subnet_t *subnet)
+{
+    uint32_t ip_h = ntohl(ip);
+    uint32_t subnet_ip_h = ntohl(subnet->ip);
+
+    return ((subnet_ip_h & subnet->mask) == (ip_h & subnet->mask));
+}
+
 int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans_domain)
 {
     char *cur_pos_ptr = receive_msg->data;
@@ -264,7 +275,19 @@ int32_t dns_ans_check(memory_t *receive_msg, memory_t *que_domain, memory_t *ans
             struct in_addr new_ip;
             new_ip.s_addr = ans->ip4;
 
-            if (is_save) {
+            int32_t correct_ip4_flag = 1;
+            if (ans->ip4 == 0) {
+                correct_ip4_flag = 0;
+            }
+
+            for (int32_t j = 0; j < blacklist_count; j++) {
+                if (in_subnet(ans->ip4, &blacklist[j])) {
+                    correct_ip4_flag = 0;
+                    break;
+                }
+            }
+
+            if (is_save && correct_ip4_flag) {
                 fprintf(ips_fp, "%s\n", inet_ntoa(new_ip));
             }
         }
@@ -327,6 +350,7 @@ void print_help(void)
            "    -d  \"x.x.x.x:xx\"    DNS address\n"
            "    -r  \"xxx\"           Request per second\n"
            "  Optional parameters:\n"
+           "    -b  \"/test.txt\"     Subnets not add to the routing table\n"
            "    --save              Save DNS answer data to cache.data,\n"
            "                        DNS answer domains to out_domains.txt,\n"
            "                        DNS answer IPs to ips.txt\n");
@@ -338,6 +362,8 @@ int32_t main(int32_t argc, char *argv[])
 {
     printf("DNS client test started\n");
     printf("Launch parameters:\n");
+
+    char blacklist_file_path[PATH_MAX];
 
     dns_addr.sin_addr.s_addr = INADDR_NONE;
 
@@ -379,6 +405,16 @@ int32_t main(int32_t argc, char *argv[])
             }
             continue;
         }
+        if (!strcmp(argv[i], "-b")) {
+            if (i != argc - 1) {
+                if (strlen(argv[i + 1]) < PATH_MAX) {
+                    strcpy(blacklist_file_path, argv[i + 1]);
+                    printf("  Blacklist  \"%s\"\n", blacklist_file_path);
+                }
+                i++;
+            }
+            continue;
+        }
         if (!strcmp(argv[i], "--save")) {
             printf("  Save  enabled\n");
             is_save = 1;
@@ -411,6 +447,43 @@ int32_t main(int32_t argc, char *argv[])
     in_domains_fp = fopen(domains_file_path, "r");
     if (!in_domains_fp) {
         errmsg("Can't open file %s\n", domains_file_path);
+    }
+
+    if (blacklist_file_path[0] != 0) {
+        FILE *blacklist_fd;
+        blacklist_fd = fopen(blacklist_file_path, "r");
+        if (blacklist_fd == NULL) {
+            errmsg("Can't open blacklist file\n");
+        }
+
+        char tmp_line[100];
+
+        while (fscanf(blacklist_fd, "%s", tmp_line) != EOF) {
+            char *slash_ptr = strchr(tmp_line, '/');
+            if (slash_ptr) {
+                uint32_t tmp_prefix = 0;
+                sscanf(slash_ptr + 1, "%u", &tmp_prefix);
+                *slash_ptr = 0;
+                if (strlen(tmp_line) < INET_ADDRSTRLEN) {
+                    if (blacklist_count < BLACKLIST_MAX_COUNT) {
+                        blacklist[blacklist_count].ip = inet_addr(tmp_line);
+                        blacklist[blacklist_count].mask = (0xFFFFFFFF << (32 - tmp_prefix)) &
+                                                          0xFFFFFFFF;
+                    }
+                    blacklist_count++;
+                }
+                *slash_ptr = '/';
+            } else {
+                print_help();
+                errmsg("Every blacklist line \"x.x.x.x/xx\"\n");
+            }
+        }
+
+        if (blacklist_count > BLACKLIST_MAX_COUNT) {
+            print_help();
+            errmsg("The program needs a maximum of %d blacklist subnets, seted %d\n",
+                   BLACKLIST_MAX_COUNT, blacklist_count);
+        }
     }
 
     if (is_save) {
