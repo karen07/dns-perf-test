@@ -387,6 +387,7 @@ int32_t main(int32_t argc, char *argv[])
     printf("Launch parameters:\n");
 
     char blacklist_file_path[PATH_MAX];
+    memset(blacklist_file_path, 0, PATH_MAX);
 
     dns_addr.sin_addr.s_addr = INADDR_NONE;
 
@@ -483,7 +484,7 @@ int32_t main(int32_t argc, char *argv[])
         FILE *blacklist_fd;
         blacklist_fd = fopen(blacklist_file_path, "r");
         if (blacklist_fd == NULL) {
-            errmsg("Can't open blacklist file\n");
+            errmsg("Can't open blacklist file %s\n", blacklist_file_path);
         }
 
         char tmp_line[100];
