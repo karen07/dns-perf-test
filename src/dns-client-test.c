@@ -342,6 +342,29 @@ void *read_dns(__attribute__((unused)) void *arg)
     return NULL;
 }
 
+void add_blacklist(const char *subnet_str)
+{
+    char tmp_subnet[100];
+    strcpy(tmp_subnet, subnet_str);
+
+    char *slash_ptr = strchr(tmp_subnet, '/');
+    if (slash_ptr) {
+        uint32_t tmp_prefix = 0;
+        sscanf(slash_ptr + 1, "%u", &tmp_prefix);
+        *slash_ptr = 0;
+        if (strlen(tmp_subnet) < INET_ADDRSTRLEN) {
+            if (blacklist_count < BLACKLIST_MAX_COUNT) {
+                blacklist[blacklist_count].ip = inet_addr(tmp_subnet);
+                blacklist[blacklist_count].mask = (0xFFFFFFFF << (32 - tmp_prefix)) & 0xFFFFFFFF;
+            }
+            blacklist_count++;
+        }
+        *slash_ptr = '/';
+    } else {
+        errmsg("Every blacklist line \"x.x.x.x/xx\"\n");
+    }
+}
+
 void print_help(void)
 {
     printf("Commands:\n"
@@ -449,6 +472,13 @@ int32_t main(int32_t argc, char *argv[])
         errmsg("Can't open file %s\n", domains_file_path);
     }
 
+    add_blacklist("0.0.0.0/8");
+    add_blacklist("10.0.0.0/8");
+    add_blacklist("100.64.0.0/10");
+    add_blacklist("127.0.0.0/8");
+    add_blacklist("172.16.0.0/12");
+    add_blacklist("192.168.0.0/16");
+
     if (blacklist_file_path[0] != 0) {
         FILE *blacklist_fd;
         blacklist_fd = fopen(blacklist_file_path, "r");
@@ -459,28 +489,10 @@ int32_t main(int32_t argc, char *argv[])
         char tmp_line[100];
 
         while (fscanf(blacklist_fd, "%s", tmp_line) != EOF) {
-            char *slash_ptr = strchr(tmp_line, '/');
-            if (slash_ptr) {
-                uint32_t tmp_prefix = 0;
-                sscanf(slash_ptr + 1, "%u", &tmp_prefix);
-                *slash_ptr = 0;
-                if (strlen(tmp_line) < INET_ADDRSTRLEN) {
-                    if (blacklist_count < BLACKLIST_MAX_COUNT) {
-                        blacklist[blacklist_count].ip = inet_addr(tmp_line);
-                        blacklist[blacklist_count].mask = (0xFFFFFFFF << (32 - tmp_prefix)) &
-                                                          0xFFFFFFFF;
-                    }
-                    blacklist_count++;
-                }
-                *slash_ptr = '/';
-            } else {
-                print_help();
-                errmsg("Every blacklist line \"x.x.x.x/xx\"\n");
-            }
+            add_blacklist(tmp_line);
         }
 
         if (blacklist_count > BLACKLIST_MAX_COUNT) {
-            print_help();
             errmsg("The program needs a maximum of %d blacklist subnets, seted %d\n",
                    BLACKLIST_MAX_COUNT, blacklist_count);
         }
