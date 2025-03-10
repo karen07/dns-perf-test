@@ -9,10 +9,10 @@ char domains_file_path[PATH_MAX];
 uint32_t rps;
 int32_t is_save;
 
-int32_t sended;
-int32_t readed;
+volatile int32_t sended;
+volatile int32_t readed;
 
-double coeff = 1;
+volatile double coeff = 1;
 
 struct sockaddr_in listen_addr, dns_addr;
 int32_t listen_socket;
@@ -77,7 +77,10 @@ void *send_dns(__attribute__((unused)) void *arg)
 
         sended = line_count;
 
-        usleep(1000000 / rps / coeff);
+        int32_t time_test = 1;
+        for (int32_t i = 0; i < 1000000 / rps / coeff * 50; i++) {
+            time_test *= 3;
+        }
     }
 
     return NULL;
